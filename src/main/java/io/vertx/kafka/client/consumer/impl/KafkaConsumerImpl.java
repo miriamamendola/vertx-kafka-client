@@ -48,7 +48,8 @@ import java.util.stream.Stream;
  */
 public class KafkaConsumerImpl<K, V> implements KafkaConsumer<K, V> {
 
-  private static final Function<Map<?, Object>, Object> mapLongFunction = done -> done.values().stream().findFirst().get();
+  private static final Function<Map<?, Object>, Object> mapLongFunction = done -> done.values().stream().findFirst()
+      .get();
 
   private static <K, V> Function<Map<K, V>, V> foo() {
     return (Function) mapLongFunction;
@@ -170,24 +171,24 @@ public class KafkaConsumerImpl<K, V> implements KafkaConsumer<K, V> {
   public Future<Map<String, List<PartitionInfo>>> listTopics() {
     return this.stream.listTopics().map(done -> {
       // TODO: use Helper class and stream approach
-      Map<String,List<PartitionInfo>> topics = new HashMap<>();
+      Map<String, List<PartitionInfo>> topics = new HashMap<>();
 
-      for (Map.Entry<String,List<org.apache.kafka.common.PartitionInfo>> topicEntry: done.entrySet()) {
+      for (Map.Entry<String, List<org.apache.kafka.common.PartitionInfo>> topicEntry : done.entrySet()) {
 
         List<PartitionInfo> partitions = new ArrayList<>();
 
-        for (org.apache.kafka.common.PartitionInfo kafkaPartitionInfo: topicEntry.getValue()) {
+        for (org.apache.kafka.common.PartitionInfo kafkaPartitionInfo : topicEntry.getValue()) {
 
           PartitionInfo partitionInfo = new PartitionInfo();
 
           partitionInfo
-            .setInSyncReplicas(
-              Stream.of(kafkaPartitionInfo.inSyncReplicas()).map(Helper::from).collect(Collectors.toList()))
-            .setLeader(Helper.from(kafkaPartitionInfo.leader()))
-            .setPartition(kafkaPartitionInfo.partition())
-            .setReplicas(
-              Stream.of(kafkaPartitionInfo.replicas()).map(Helper::from).collect(Collectors.toList()))
-            .setTopic(kafkaPartitionInfo.topic());
+              .setInSyncReplicas(
+                  Stream.of(kafkaPartitionInfo.inSyncReplicas()).map(Helper::from).collect(Collectors.toList()))
+              .setLeader(Helper.from(kafkaPartitionInfo.leader()))
+              .setPartition(kafkaPartitionInfo.partition())
+              .setReplicas(
+                  Stream.of(kafkaPartitionInfo.replicas()).map(Helper::from).collect(Collectors.toList()))
+              .setTopic(kafkaPartitionInfo.topic());
 
           partitions.add(partitionInfo);
 
@@ -217,6 +218,12 @@ public class KafkaConsumerImpl<K, V> implements KafkaConsumer<K, V> {
   @Override
   public KafkaConsumer<K, V> partitionsRevokedHandler(Handler<Set<TopicPartition>> handler) {
     this.stream.partitionsRevokedHandler(Helper.adaptHandler(handler));
+    return this;
+  }
+
+  @Override
+  public KafkaConsumer<K, V> partitionsLostHandler(Handler<Set<TopicPartition>> handler) {
+    this.stream.partitionsLostHandler(Helper.adaptHandler(handler));
     return this;
   }
 
@@ -276,18 +283,18 @@ public class KafkaConsumerImpl<K, V> implements KafkaConsumer<K, V> {
     return this.stream.partitionsFor(topic).map(done -> {
       // TODO: use Helper class and stream approach
       List<PartitionInfo> partitions = new ArrayList<>();
-      for (org.apache.kafka.common.PartitionInfo kafkaPartitionInfo: done) {
+      for (org.apache.kafka.common.PartitionInfo kafkaPartitionInfo : done) {
 
         PartitionInfo partitionInfo = new PartitionInfo();
 
         partitionInfo
-          .setInSyncReplicas(
-            Stream.of(kafkaPartitionInfo.inSyncReplicas()).map(Helper::from).collect(Collectors.toList()))
-          .setLeader(Helper.from(kafkaPartitionInfo.leader()))
-          .setPartition(kafkaPartitionInfo.partition())
-          .setReplicas(
-            Stream.of(kafkaPartitionInfo.replicas()).map(Helper::from).collect(Collectors.toList()))
-          .setTopic(kafkaPartitionInfo.topic());
+            .setInSyncReplicas(
+                Stream.of(kafkaPartitionInfo.inSyncReplicas()).map(Helper::from).collect(Collectors.toList()))
+            .setLeader(Helper.from(kafkaPartitionInfo.leader()))
+            .setPartition(kafkaPartitionInfo.partition())
+            .setReplicas(
+                Stream.of(kafkaPartitionInfo.replicas()).map(Helper::from).collect(Collectors.toList()))
+            .setTopic(kafkaPartitionInfo.topic());
 
         partitions.add(partitionInfo);
       }
@@ -314,13 +321,16 @@ public class KafkaConsumerImpl<K, V> implements KafkaConsumer<K, V> {
 
     return this.stream.offsetsForTimes(Helper.toTopicPartitionTimes(topicPartitions)).map(done -> {
       if (done.values().size() == 1) {
-        org.apache.kafka.common.TopicPartition kTopicPartition = new org.apache.kafka.common.TopicPartition (topicPartition.getTopic(), topicPartition.getPartition());
+        org.apache.kafka.common.TopicPartition kTopicPartition = new org.apache.kafka.common.TopicPartition(
+            topicPartition.getTopic(), topicPartition.getPartition());
         org.apache.kafka.clients.consumer.OffsetAndTimestamp offsetAndTimestamp = done.get(kTopicPartition);
-        if(offsetAndTimestamp != null) {
-          OffsetAndTimestamp resultOffsetAndTimestamp = new OffsetAndTimestamp(offsetAndTimestamp.offset(), offsetAndTimestamp.timestamp());
+        if (offsetAndTimestamp != null) {
+          OffsetAndTimestamp resultOffsetAndTimestamp = new OffsetAndTimestamp(offsetAndTimestamp.offset(),
+              offsetAndTimestamp.timestamp());
           return resultOffsetAndTimestamp;
         }
-        // offsetAndTimestamp is null, i.e., search by timestamp did not lead to a result
+        // offsetAndTimestamp is null, i.e., search by timestamp did not lead to a
+        // result
         else {
           return null;
         }
@@ -333,8 +343,10 @@ public class KafkaConsumerImpl<K, V> implements KafkaConsumer<K, V> {
   }
 
   @Override
-  public Future<Map<TopicPartition, OffsetAndTimestamp>> offsetsForTimes(Map<TopicPartition, Long> topicPartitionTimestamps) {
-    return this.stream.offsetsForTimes(Helper.toTopicPartitionTimes(topicPartitionTimestamps)).map(Helper::fromTopicPartitionOffsetAndTimestamp);
+  public Future<Map<TopicPartition, OffsetAndTimestamp>> offsetsForTimes(
+      Map<TopicPartition, Long> topicPartitionTimestamps) {
+    return this.stream.offsetsForTimes(Helper.toTopicPartitionTimes(topicPartitionTimestamps))
+        .map(Helper::fromTopicPartitionOffsetAndTimestamp);
   }
 
   @Override

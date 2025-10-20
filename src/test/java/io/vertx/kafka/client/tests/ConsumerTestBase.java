@@ -527,6 +527,107 @@ public abstract class ConsumerTestBase extends KafkaClusterTestBase {
   }
 
   @Test
+  public void testRebalanceWithLostPartitions(TestContext ctx) throws Exception {
+    String topicName = "testRebalanceWithLostPartitions-" + this.getClass().getName();
+    String consumerId = topicName;
+    kafkaCluster.createTopic(topicName, 2, 1);
+    Properties config = kafkaCluster.useTo().getConsumerProperties(consumerId, consumerId,
+        OffsetResetStrategy.EARLIEST);
+    config.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+    config.put(ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class);
+    Context context = vertx.getOrCreateContext();
+    consumer = createConsumer(context, config);
+
+    // We need to rename the client to avoid
+    // javax.management.InstanceAlreadyExistsException
+    // see https://github.com/vert-x3/vertx-kafka-client/issues/5
+    config.setProperty("client.id", "the_consumer2");
+    consumer2 = createConsumer(vertx, config);
+    consumer.handler(rec -> {
+    });
+    consumer2.handler(rec -> {
+    });
+    Async rebalanced = ctx.async(2);
+    AtomicInteger status = new AtomicInteger();
+
+    // after subscribe, consumer will get assigned both partitions
+    // we use the handler to add the second consumer and trigger a rebalance
+    consumer.partitionsAssignedHandler(partitions -> {
+      ctx.assertEquals(Vertx.currentContext(), context);
+      switch (status.getAndIncrement()) {
+        case 0:
+          consumer2.subscribe(Collections.singleton(topicName));
+          ctx.assertEquals(2, partitions.size());
+          ctx.assertTrue(partitions.contains(new TopicPartition(topicName, 0)));
+          ctx.assertTrue(partitions.contains(new TopicPartition(topicName, 1)));
+          break;
+        case 1:
+          // cant get partitions assigned again after the rebalance
+          ctx.fail();
+          break;
+        case 2:
+          // after rebalancing is finished, consumer 1 will see assigned the first
+          // partition
+          ctx.assertEquals(1, partitions.size());
+          break;
+        case 3:
+          ctx.assertEquals(2, partitions.size());
+          rebalanced.countDown();
+          break;
+      }
+    });
+    // partitions are lost if the consumer doesn't heartbeat in time
+    consumer.partitionsRevokedHandler(partitions -> {
+      ctx.assertEquals(Vertx.currentContext(), context);
+      switch (status.getAndIncrement()) {
+        case 0:
+          ctx.fail();
+          break;
+        case 1:
+          // in eager rebalancing both partitions are revoked
+          ctx.assertEquals(2, partitions.size());
+          ctx.assertTrue(partitions.contains(new TopicPartition(topicName, 0)));
+          ctx.assertTrue(partitions.contains(new TopicPartition(topicName, 1)));
+          break;
+        case 2:
+          ctx.fail();
+          break;
+      }
+    });
+
+    AtomicInteger status2 = new AtomicInteger();
+    consumer2.partitionsAssignedHandler(partitions -> {
+      switch (status2.getAndIncrement()) {
+        case 0:
+          ctx.assertEquals(1, partitions.size());
+          // consumer2 will have 1 partitions, then we simulate a timeout to invoke the
+          // partitions lost hander
+          try {
+            Thread.sleep(7000); // Longer than max.poll.interval.ms
+          } catch (InterruptedException e) {
+            ctx.fail(e);
+          }
+          break;
+      }
+    });
+
+    consumer2.partitionsLostHandler(partitions -> {
+      switch (status2.getAndIncrement()) {
+        case 0:
+          ctx.fail();
+          break;
+        case 1:
+          ctx.assertEquals(1, partitions.size());
+          rebalanced.countDown();
+          break;
+      }
+    });
+
+    consumer.subscribe(Collections.singleton(topicName));
+
+  }
+
+  @Test
   public void testSeek(TestContext ctx) throws Exception {
     int numMessages = 500;
     final String topicName = "the_topic_0-" + this.getClass().getName();

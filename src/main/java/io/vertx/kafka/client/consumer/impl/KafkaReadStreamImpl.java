@@ -69,17 +69,29 @@ public class KafkaReadStreamImpl<K, V> implements KafkaReadStream<K, V> {
   private Iterator<ConsumerRecord<K, V>> current; // Accessed on event loop
   private Handler<ConsumerRecords<K, V>> batchHandler;
   private Handler<Set<TopicPartition>> partitionsRevokedHandler;
+  private Handler<Set<TopicPartition>> partitionsLostHandler;
   private Handler<Set<TopicPartition>> partitionsAssignedHandler;
   private Duration pollTimeout = Duration.ofSeconds(1);
 
   private ExecutorService worker;
 
-  private final ConsumerRebalanceListener rebalanceListener =  new ConsumerRebalanceListener() {
+  private final ConsumerRebalanceListener rebalanceListener = new ConsumerRebalanceListener() {
 
     @Override
     public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
 
       Handler<Set<TopicPartition>> handler = partitionsRevokedHandler;
+      if (handler != null) {
+        context.runOnContext(v -> {
+          handler.handle(Helper.toSet(partitions));
+        });
+      }
+    }
+
+    @Override
+    public void onPartitionsLost(Collection<TopicPartition> partitions) {
+
+      Handler<Set<TopicPartition>> handler = partitionsLostHandler;
       if (handler != null) {
         context.runOnContext(v -> {
           handler.handle(Helper.toSet(partitions));
@@ -107,11 +119,13 @@ public class KafkaReadStreamImpl<K, V> implements KafkaReadStream<K, V> {
   }
 
   private <T> void start(java.util.function.BiConsumer<Consumer<K, V>, Promise<T>> task, Completable<T> handler) {
-    this.worker = Executors.newSingleThreadExecutor(r -> new Thread(r, "vert.x-kafka-consumer-thread-" + threadCount.getAndIncrement()));
+    this.worker = Executors
+        .newSingleThreadExecutor(r -> new Thread(r, "vert.x-kafka-consumer-thread-" + threadCount.getAndIncrement()));
     this.submitTaskWhenStarted(task, handler);
   }
 
-  private <T> void submitTaskWhenStarted(java.util.function.BiConsumer<Consumer<K, V>, Promise<T>> task, Completable<T> handler) {
+  private <T> void submitTaskWhenStarted(java.util.function.BiConsumer<Consumer<K, V>, Promise<T>> task,
+      Completable<T> handler) {
     if (worker == null) {
       throw new IllegalStateException();
     }
@@ -119,13 +133,13 @@ public class KafkaReadStreamImpl<K, V> implements KafkaReadStream<K, V> {
       Promise<T> future = null;
       if (handler != null) {
         future = Promise.promise();
-        future.future().onComplete((res, err)-> {
+        future.future().onComplete((res, err) -> {
           // When we've executed the task on the worker thread,
           // run the callback on the eventloop thread
-          this.context.runOnContext(v-> {
+          this.context.runOnContext(v -> {
             handler.complete(res, err);
-            });
           });
+        });
       }
       try {
         task.accept(this.consumer, future);
@@ -141,37 +155,37 @@ public class KafkaReadStreamImpl<K, V> implements KafkaReadStream<K, V> {
   }
 
   private void pollRecords(Handler<ConsumerRecords<K, V>> handler) {
-      if(this.polling.compareAndSet(false, true)){
-          this.worker.submit(() -> {
-             boolean submitted = false;
-             try {
-                if (!this.closed.get()) {
-                  try {
-                    ConsumerRecords<K, V> records = this.consumer.poll(pollTimeout);
-                    if (records != null && records.count() > 0) {
-                      submitted = true; // sets false only when the iterator is overwritten
-                      this.context.runOnContext(v -> {
-                          this.polling.set(false);
-                          handler.handle(records);
-                      });
-                    }
-                  } catch (WakeupException ignore) {
-                  } catch (Exception e) {
-                    if (exceptionHandler != null) {
-                      exceptionHandler.handle(e);
-                    }
-                  }
-                }
-             } finally {
-                 if(!submitted){
-                     this.context.runOnContext(v -> {
-                         this.polling.set(false);
-                         schedule(0);
-                     });
-                 }
-             }
-          });
-      }
+    if (this.polling.compareAndSet(false, true)) {
+      this.worker.submit(() -> {
+        boolean submitted = false;
+        try {
+          if (!this.closed.get()) {
+            try {
+              ConsumerRecords<K, V> records = this.consumer.poll(pollTimeout);
+              if (records != null && records.count() > 0) {
+                submitted = true; // sets false only when the iterator is overwritten
+                this.context.runOnContext(v -> {
+                  this.polling.set(false);
+                  handler.handle(records);
+                });
+              }
+            } catch (WakeupException ignore) {
+            } catch (Exception e) {
+              if (exceptionHandler != null) {
+                exceptionHandler.handle(e);
+              }
+            }
+          }
+        } finally {
+          if (!submitted) {
+            this.context.runOnContext(v -> {
+              this.polling.set(false);
+              schedule(0);
+            });
+          }
+        }
+      });
+    }
   }
 
   private void schedule(long delay) {
@@ -205,7 +219,8 @@ public class KafkaReadStreamImpl<K, V> implements KafkaReadStream<K, V> {
 
         if (records != null && records.count() > 0) {
           if (handler != null) {
-            // only set iterator if records are going to be consumed by individual record handler
+            // only set iterator if records are going to be consumed by individual record
+            // handler
             this.current = records.iterator();
           }
           if (multiHandler != null) {
@@ -220,10 +235,10 @@ public class KafkaReadStreamImpl<K, V> implements KafkaReadStream<K, V> {
     } else {
 
       int count = 0;
-      out:
-      while (this.current.hasNext() && count++ < 10) {
+      out: while (this.current.hasNext() && count++ < 10) {
 
-        // to honor the Vert.x ReadStream contract, handler should not be called if stream is paused
+        // to honor the Vert.x ReadStream contract, handler should not be called if
+        // stream is paused
         while (true) {
           long v = this.demand.get();
           if (v <= 0L) {
@@ -234,7 +249,7 @@ public class KafkaReadStreamImpl<K, V> implements KafkaReadStream<K, V> {
         }
 
         ConsumerRecord<K, V> next = this.current.next();
-        ContextInternal ctx = ((ContextInternal)this.context).duplicate();
+        ContextInternal ctx = ((ContextInternal) this.context).duplicate();
         ctx.emit(v -> this.tracedHandler(ctx, handler).handle(next));
       }
       this.schedule(0);
@@ -242,17 +257,16 @@ public class KafkaReadStreamImpl<K, V> implements KafkaReadStream<K, V> {
   }
 
   private Handler<ConsumerRecord<K, V>> tracedHandler(Context ctx, Handler<ConsumerRecord<K, V>> handler) {
-    return this.tracer == null ? handler :
-      rec -> {
-        ConsumerTracer.StartedSpan startedSpan = tracer.prepareMessageReceived(ctx, rec);
-        try {
-          handler.handle(rec);
-          startedSpan.finish(ctx);
-        } catch (Throwable t) {
-          startedSpan.fail(ctx, t);
-          throw t;
-        }
-      };
+    return this.tracer == null ? handler : rec -> {
+      ConsumerTracer.StartedSpan startedSpan = tracer.prepareMessageReceived(ctx, rec);
+      try {
+        handler.handle(rec);
+        startedSpan.finish(ctx);
+      } catch (Throwable t) {
+        startedSpan.fail(ctx, t);
+        throw t;
+      }
+    };
   }
 
   protected <T> Future<T> submitTask2(java.util.function.BiConsumer<Consumer<K, V>, Promise<T>> task) {
@@ -262,7 +276,7 @@ public class KafkaReadStreamImpl<K, V> implements KafkaReadStream<K, V> {
   }
 
   protected <T> void submitTask(java.util.function.BiConsumer<Consumer<K, V>, Promise<T>> task,
-                                Completable<T> handler) {
+      Completable<T> handler) {
     if (this.closed.compareAndSet(true, false)) {
       this.start(task, handler);
     } else {
@@ -377,6 +391,12 @@ public class KafkaReadStreamImpl<K, V> implements KafkaReadStream<K, V> {
   @Override
   public KafkaReadStream<K, V> partitionsRevokedHandler(Handler<Set<TopicPartition>> handler) {
     this.partitionsRevokedHandler = handler;
+    return this;
+  }
+
+  @Override
+  public KafkaReadStream<K, V> partitionsLostHandler(Handler<Set<TopicPartition>> handler) {
+    this.partitionsLostHandler = handler;
     return this;
   }
 
@@ -585,7 +605,8 @@ public class KafkaReadStreamImpl<K, V> implements KafkaReadStream<K, V> {
   public Future<Void> close() {
     final ContextInternal ctx = (ContextInternal) this.context;
     if (this.closed.compareAndSet(false, true)) {
-      // Call wakeup before closing the consumer, so that existing tasks in the executor queue will
+      // Call wakeup before closing the consumer, so that existing tasks in the
+      // executor queue will
       // wake up while we wait for processing the below added "close" task.
       this.consumer.wakeup();
 
@@ -616,7 +637,8 @@ public class KafkaReadStreamImpl<K, V> implements KafkaReadStream<K, V> {
   }
 
   @Override
-  public Future<Map<TopicPartition, OffsetAndTimestamp>> offsetsForTimes(Map<TopicPartition, Long> topicPartitionTimestamps) {
+  public Future<Map<TopicPartition, OffsetAndTimestamp>> offsetsForTimes(
+      Map<TopicPartition, Long> topicPartitionTimestamps) {
     return this.submitTask2((consumer, future) -> {
       Map<TopicPartition, OffsetAndTimestamp> offsetsForTimes = this.consumer.offsetsForTimes(topicPartitionTimestamps);
       if (future != null) {

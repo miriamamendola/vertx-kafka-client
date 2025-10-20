@@ -119,8 +119,9 @@ to be assigned to other consumers) or a new consumer joins the group (so it want
 
 You can register handlers on a {@link io.vertx.kafka.client.consumer.KafkaConsumer} to be notified
 of the partitions revocations and assignments by the Kafka cluster using
-{@link io.vertx.kafka.client.consumer.KafkaConsumer#partitionsRevokedHandler(io.vertx.core.Handler)} and
-{@link io.vertx.kafka.client.consumer.KafkaConsumer#partitionsAssignedHandler(io.vertx.core.Handler)}.
+{@link io.vertx.kafka.client.consumer.KafkaConsumer#partitionsRevokedHandler(io.vertx.core.Handler)},
+{@link io.vertx.kafka.client.consumer.KafkaConsumer#partitionsAssignedHandler(io.vertx.core.Handler)} and
+{@link io.vertx.kafka.client.consumer.KafkaConsumer#partitionsLostHandler(io.vertx.core.Handler)}.
 
 [source,$lang]
 ----
